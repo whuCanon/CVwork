@@ -1,12 +1,13 @@
 
 #include <omp.h>
 #include <Eigen/Dense>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
 
 #include <iostream>
 #include <vector>
 #include <string>
 
-#include "shader.hpp"
 #include "ply_file_io.hpp"
 #include "image_handler.hpp"
 
@@ -14,11 +15,18 @@
 #define IMAGE_COL 4272
 #define IMAGE_NUM  600
 
+using namespace cv;
 using namespace std;
 using namespace pcl;
 using namespace Eigen;
 
-void getMapMatrix(MatrixXi &mat, MatrixXi &pixels,VectorXd depth, MatrixXi &pixel_isOccupyed, int index);
+
+void getMapMatrix(MatrixXi &mat, MatrixXi &pixels, VectorXd depth, MatrixXi &pixel_isOccupyed, int index);
+
+/*  shading the final color assignment for each vetex by simply compute the
+average of the corresponding colors in images.*/
+void shading(MyPolygonMesh &mesh, vector<string> &images, MatrixXi &mapMat);
+
 
 int main(int argc, char **argv)
 {
@@ -26,12 +34,13 @@ int main(int argc, char **argv)
 	string input_dir_images = argv[2];
 	string input_dir_h5 = argv[3];
 	string input_file_h5 = argv[4];
+	string output_file_ply = argv[5];
 
 	MyPolygonMesh myMesh(input_file_ply);
 	vector<string> images = getFilesInDir(input_dir_images, ".jpg");
 	vector<MatrixXd> T = getTInFile(input_dir_h5, input_file_h5);	//	the projection matrix in 3*4 size
 	/*  the mapping matrix between image and corresponding visible vertexs.
-		If there is a mapping, the value in mapMat(i, j) is the pixel of 
+		If there is a mapping, the value in mapMat(i, j) is the pixel of
 		vertexs(j) in image(i), stored in 'int' which x in higher 16 bits
 		and y in lower 16 bits, 0 otherwise. */
 	MatrixXi mapMat(MatrixXi::Zero(images.size(), myMesh.vertexNum));
@@ -40,13 +49,13 @@ int main(int argc, char **argv)
 	MatrixXd points(3, myMesh.vertexNum);				// the homo-coordinates of all vertex in one image plain
 	MatrixXi pixel_of_v(2, myMesh.vertexNum);			// the coordinate pixel of all vertex in one image
 	/*  the occupancy of vetexs for a particular image.
-		If pixel(i,j) is occupyed in the image by a vetex, the value 
+		If pixel(i,j) is occupyed in the image by a vetex, the value
 		is the index of this vetex, 0 otherwise.*/
 	MatrixXi pixel_isOccupyed(MatrixXi::Zero(IMAGE_ROW, IMAGE_COL));
 
 	for (int i = 0; i < myMesh.vertexNum; i++)
 		vertexs.col(i) << (Vector4d() << myMesh.vertexs.at(i).cast<double>(), 1).finished();
-	
+
 #ifdef _USE_OMP
 	int processorNum = atoi(getenv("NUMBER_OF_PROCESSORS")) - 1;
 
@@ -63,8 +72,8 @@ int main(int argc, char **argv)
 
 	int thread_id;
 	omp_set_num_threads(processorNum);
-	
-#pragma omp parallel for shared(T, mapMat, vertexs, OMP_points, OMP_pixel_of_v, OMP_pixel_isOccupyed) private(thread_id)
+
+	#pragma omp parallel for shared(T, mapMat, vertexs, OMP_points, OMP_pixel_of_v, OMP_pixel_isOccupyed) private(thread_id)
 	for (int i = 0; i < IMAGE_NUM; i++)
 	{
 		thread_id = omp_get_thread_num();
@@ -90,15 +99,14 @@ int main(int argc, char **argv)
 	}
 #endif // _USE_OMP
 
-	myMesh.colors = shading(images, mapMat);
-
-	while (1) cout << myMesh.colors.col(0) << endl;
+	shading(myMesh, images, mapMat);
+	myMesh.writeMesh(output_file_ply);
 
 	return 0;
 }
 
 
-void getMapMatrix(MatrixXi &mat, MatrixXi &pixels,VectorXd depth, MatrixXi &pixel_isOccupyed, int index)
+void getMapMatrix(MatrixXi &mat, MatrixXi &pixels, VectorXd depth, MatrixXi &pixel_isOccupyed, int index)
 {
 	int vertexNum = depth.size();
 	int occupyIndex;
@@ -111,7 +119,7 @@ void getMapMatrix(MatrixXi &mat, MatrixXi &pixels,VectorXd depth, MatrixXi &pixe
 		if (!occupyIndex)
 		{
 			pixel_isOccupyed(pixels(0, i), pixels(1, i)) = i;
-			mat(index, i) = (pixels(0,i) << 16) + pixels(1, i);
+			mat(index, i) = (pixels(0, i) << 16) + pixels(1, i);
 		}
 		else if (depth(i) < depth(occupyIndex))
 		{
@@ -120,4 +128,30 @@ void getMapMatrix(MatrixXi &mat, MatrixXi &pixels,VectorXd depth, MatrixXi &pixe
 			mat(index, i) = (pixels(0, i) << 16) + pixels(1, i);
 		}
 	}
+}
+
+
+void shading(MyPolygonMesh &mesh, vector<string>& images, MatrixXi & mapMat)
+{
+	Mat temp_image;
+	int vertexNum = mesh.vertexNum;
+	int imageNum = images.size();
+	MatrixXf counts(MatrixXf::Zero(1, vertexNum));			//	the count of value
+
+#ifdef _USE_OMP
+	#pragma omp parallel for shared(mesh, images, mapMat, counts, imageNum, vertexNum) private(temp_image)
+#endif // _USE_OMP
+	for (int i = 0; i < imageNum; i++)
+	{
+		temp_image = imread(images.at(i));
+		for (int j = 0; j < vertexNum && mapMat(i, j); j++)
+		{
+			mesh.colors.col(j) += *(temp_image.ptr<Vector3f>(mapMat(i, j) >> 16, mapMat(i, j) & 0x00001111));
+			counts(0, j) += 1;
+		}
+	}
+
+	mesh.colors.row(0) << mesh.colors.row(0).cwiseQuotient(counts.row(0));
+	mesh.colors.row(1) << mesh.colors.row(1).cwiseQuotient(counts.row(0));
+	mesh.colors.row(2) << mesh.colors.row(2).cwiseQuotient(counts.row(0));
 }
