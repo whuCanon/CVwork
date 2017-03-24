@@ -4,6 +4,10 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
+#ifdef DEBUG
+#include <fstream>
+#endif // DEBUG
+
 #include <iostream>
 #include <vector>
 #include <string>
@@ -93,7 +97,7 @@ int main(int argc, char **argv)
 		points.row(0) << points.row(0).cwiseQuotient(points.row(2));
 		points.row(1) << points.row(1).cwiseQuotient(points.row(2));
 		pixel_of_v << points.topRows(2).cast<int>();
-
+		
 		getMapMatrix(mapMat, pixel_of_v, points.row(2), pixel_isOccupyed, i);
 		cout << "step\t" << i << endl;
 	}
@@ -101,6 +105,18 @@ int main(int argc, char **argv)
 
 	shading(myMesh, images, mapMat);
 	myMesh.writeMesh(output_file_ply);
+
+#ifdef DEBUG
+	ofstream debug_stream;
+	debug_stream.open("C:\\Temp\\data\\debug.log");
+
+	Mat_<cv::Vec3b> debug_image = imread(images.at(0));
+	debug_stream << "r,g,b:\t" << static_cast<int>(debug_image(1100, 2100)[0]) << "\t"
+				 << static_cast<int>(debug_image(1100, 2100)[1]) << "\t" 
+				 << static_cast<int>(debug_image(1100, 2100)[2]) << endl;
+
+	debug_stream.close();
+#endif // DEBUG
 
 	return 0;
 }
@@ -131,27 +147,32 @@ void getMapMatrix(MatrixXi &mat, MatrixXi &pixels, VectorXd depth, MatrixXi &pix
 }
 
 
-void shading(MyPolygonMesh &mesh, vector<string>& images, MatrixXi & mapMat)
+void shading(MyPolygonMesh &mesh, vector<string> &images, MatrixXi &mapMat)
 {
-	Mat temp_image;
+	Mat_<cv::Vec3b> temp_image;
+	int pixel[2];
 	int vertexNum = mesh.vertexNum;
 	int imageNum = images.size();
-	MatrixXf counts(MatrixXf::Zero(1, vertexNum));			//	the count of value
+	MatrixXi counts(MatrixXi::Zero(1, vertexNum));			//	the count of value
 
 #ifdef _USE_OMP
-	#pragma omp parallel for shared(mesh, images, mapMat, counts, imageNum, vertexNum) private(temp_image)
+	#pragma omp parallel for shared(mesh, images, mapMat, counts, imageNum, vertexNum) private(temp_image, pixel)
 #endif // _USE_OMP
 	for (int i = 0; i < imageNum; i++)
 	{
 		temp_image = imread(images.at(i));
 		for (int j = 0; j < vertexNum && mapMat(i, j); j++)
 		{
-			mesh.colors.col(j) += *(temp_image.ptr<Vector3f>(mapMat(i, j) >> 16, mapMat(i, j) & 0x00001111));
-			counts(0, j) += 1;
+			pixel[0] = mapMat(i, j) >> 16;
+			pixel[1] = mapMat(i, j) & 0x00001111;
+			mesh.colors(2, j) += temp_image(pixel[0], pixel[1])[0];
+			mesh.colors(1, j) += temp_image(pixel[0], pixel[1])[1];
+			mesh.colors(0, j) += temp_image(pixel[0], pixel[1])[2];
+			counts(0, j)++;
 		}
 	}
 
-	mesh.colors.row(0) << mesh.colors.row(0).cwiseQuotient(counts.row(0));
-	mesh.colors.row(1) << mesh.colors.row(1).cwiseQuotient(counts.row(0));
-	mesh.colors.row(2) << mesh.colors.row(2).cwiseQuotient(counts.row(0));
+	mesh.colors.row(0) << mesh.colors.row(0).cwiseQuotient(counts.cast<float>());
+	mesh.colors.row(1) << mesh.colors.row(1).cwiseQuotient(counts.cast<float>());
+	mesh.colors.row(2) << mesh.colors.row(2).cwiseQuotient(counts.cast<float>());
 }

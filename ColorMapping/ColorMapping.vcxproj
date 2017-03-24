@@ -94,7 +94,7 @@
       <SDLCheck>true</SDLCheck>
       <AdditionalIncludeDirectories>C:\Program Files\HDF_Group\HDF5\1.8.18\include;C:\Program Files\Eigen\include\eigen3;C:\Program Files\flann\include;C:\Program Files\OpenNI\Include;C:\Program Files\OpenNI2\Include;C:\Program Files\qhull\include;C:\Program Files\VTK\include\vtk-7.1;C:\Program Files\boost_1_63_0;C:\Program Files\VTK\include;C:\Program Files\PCL\include\pcl-1.8;C:\Program Files\opencv\opencv2.4\opencv\build\include\opencv2;C:\Program Files\opencv\opencv2.4\opencv\build\include\opencv;C:\Program Files\opencv\opencv2.4\opencv\build\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v8.0\include</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4996</AdditionalOptions>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_USE_OMP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_USE_OMP;DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>

@@ -122,7 +122,7 @@ void MyPolygonMesh::writeMesh(string ply_filename)
 	out_stream << "property uchar green" << endl;
 	out_stream << "property uchar blue" << endl;
 	out_stream << "element face " << this->polygons.size() << endl;
-	out_stream << "property list uchar int vertex_index" << endl;
+	out_stream << "property list uchar int vertex_indices" << endl;
 	out_stream << "end_header" << endl;
 
 	//	write vertexs
@@ -131,9 +131,9 @@ void MyPolygonMesh::writeMesh(string ply_filename)
 		out_stream << this->vertexs.at(i)(0) << " ";
 		out_stream << this->vertexs.at(i)(1) << " ";
 		out_stream << this->vertexs.at(i)(2) << " ";
-		out_stream << static_cast<int>(static_cast<uchar>(this->colors(0, i))) << " ";
-		out_stream << static_cast<int>(static_cast<uchar>(this->colors(1, i))) << " ";
-		out_stream << static_cast<int>(static_cast<uchar>(this->colors(2, i))) << " " << endl;
+		out_stream << static_cast<int>(this->colors(0, i)) << " ";
+		out_stream << static_cast<int>(this->colors(1, i)) << " ";
+		out_stream << static_cast<int>(this->colors(2, i)) << " " << endl;
 	}
 
 	//	write face
@@ -141,7 +141,7 @@ void MyPolygonMesh::writeMesh(string ply_filename)
 	{
 		out_stream << this->polygons.at(i).vertices[0] << " ";
 		out_stream << this->polygons.at(i).vertices[1] << " ";
-		out_stream << this->polygons.at(i).vertices[2] << " " << endl;
+		out_stream << this->polygons.at(i).vertices[2] << endl;
 	}
 
 	out_stream.close();
