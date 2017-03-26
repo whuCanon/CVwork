@@ -5,6 +5,7 @@
 #include <opencv2/highgui/highgui.hpp>
 
 #ifdef DEBUG
+#include <ctime>
 #include <fstream>
 #endif // DEBUG
 
@@ -17,7 +18,6 @@
 
 #define IMAGE_ROW 2848
 #define IMAGE_COL 4272
-#define IMAGE_NUM  600
 
 using namespace cv;
 using namespace std;
@@ -34,6 +34,12 @@ void shading(MyPolygonMesh &mesh, vector<string> &images, MatrixXi &mapMat);
 
 int main(int argc, char **argv)
 {
+#ifdef DEBUG
+	time_t time_clock = time(0);
+	ofstream debug_stream;
+	debug_stream.open("C:\\Temp\\data\\debug.log");
+#endif // DEBUG
+
 	string input_file_ply = argv[1];
 	string input_dir_images = argv[2];
 	string input_dir_h5 = argv[3];
@@ -55,43 +61,54 @@ int main(int argc, char **argv)
 	/*  the occupancy of vetexs for a particular image.
 		If pixel(i,j) is occupyed in the image by a vetex, the value
 		is the index of this vetex, 0 otherwise.*/
-	MatrixXi pixel_isOccupyed(MatrixXi::Zero(IMAGE_ROW, IMAGE_COL));
+	MatrixXi pixel_isOccupyed(IMAGE_ROW, IMAGE_COL);
 
 	for (int i = 0; i < myMesh.vertexNum; i++)
 		vertexs.col(i) << (Vector4d() << myMesh.vertexs.at(i).cast<double>(), 1).finished();
+	int image_size = images.size();
+
+#ifdef DEBUG
+	debug_stream << "initializing time:\t" << time(0) - time_clock << endl;
+	time_clock = time(0);
+#endif // DEBUG
 
 #ifdef _USE_OMP
+	int thread_id;
 	int processorNum = atoi(getenv("NUMBER_OF_PROCESSORS")) - 1;
 
-	vector<MatrixXd> OMP_points;
-	vector<MatrixXi> OMP_pixel_of_v;
-	vector<MatrixXi> OMP_pixel_isOccupyed;
+	MatrixXd *OMP_points = new MatrixXd [processorNum];
+	MatrixXi *OMP_pixel_of_v = new MatrixXi [processorNum];
+	MatrixXi *OMP_pixel_isOccupyed = new MatrixXi [processorNum];
 
 	for (int i = 0; i < processorNum; i++)
 	{
-		OMP_points.push_back(MatrixXd(3, myMesh.vertexNum));
-		OMP_pixel_of_v.push_back(MatrixXi(2, myMesh.vertexNum));
-		OMP_pixel_isOccupyed.push_back(MatrixXi::Zero(IMAGE_ROW, IMAGE_COL));
+		OMP_points[i] = MatrixXd(3, myMesh.vertexNum);
+		OMP_pixel_of_v[i] = MatrixXi(2, myMesh.vertexNum);
+		OMP_pixel_isOccupyed[i] = MatrixXi::Zero(IMAGE_ROW, IMAGE_COL);
 	}
 
-	int thread_id;
 	omp_set_num_threads(processorNum);
-
+	
 	#pragma omp parallel for shared(T, mapMat, vertexs, OMP_points, OMP_pixel_of_v, OMP_pixel_isOccupyed) private(thread_id)
-	for (int i = 0; i < IMAGE_NUM; i++)
+	for (int i = 0; i < image_size; i++)
 	{
 		thread_id = omp_get_thread_num();
 
-		OMP_points.at(thread_id) << T.at(i) * vertexs;
-		OMP_points.at(thread_id).row(0) << OMP_points.at(thread_id).row(0).cwiseQuotient(OMP_points.at(thread_id).row(2));
-		OMP_points.at(thread_id).row(1) << OMP_points.at(thread_id).row(1).cwiseQuotient(OMP_points.at(thread_id).row(2));
-		OMP_pixel_of_v.at(thread_id) << OMP_points.at(thread_id).topRows(2).cast<int>();
+		OMP_points[thread_id] << T.at(i) * vertexs;
+		OMP_points[thread_id].row(0) << OMP_points[thread_id].row(0).cwiseQuotient(OMP_points[thread_id].row(2));
+		OMP_points[thread_id].row(1) << OMP_points[thread_id].row(1).cwiseQuotient(OMP_points[thread_id].row(2));
+		OMP_pixel_of_v[thread_id] << OMP_points[thread_id].topRows(2).cast<int>();
 
-		getMapMatrix(mapMat, OMP_pixel_of_v.at(thread_id), OMP_points.at(thread_id).row(2), OMP_pixel_isOccupyed.at(thread_id), i);
+		getMapMatrix(mapMat, OMP_pixel_of_v[thread_id], OMP_points[thread_id].row(2), OMP_pixel_isOccupyed[thread_id], i);
 		cout << "step\t" << i << endl;
 	}
+
+	delete[] OMP_points;
+	delete[] OMP_pixel_of_v;
+	delete[] OMP_pixel_isOccupyed;
 #else
-	for (int i = 0; i < IMAGE_NUM; i++)
+	pixel_isOccupyed = MatrixXi::Zero(IMAGE_ROW, IMAGE_COL);
+	for (int i = 0; i < image_size; i++)
 	{
 		points << T.at(i) * vertexs;
 		points.row(0) << points.row(0).cwiseQuotient(points.row(2));
@@ -103,18 +120,22 @@ int main(int argc, char **argv)
 	}
 #endif // _USE_OMP
 
+#ifdef DEBUG
+	debug_stream << "compute mapping time:\t" << time(0) - time_clock << endl;
+	time_clock = time(0);
+#endif // DEBUG
+
 	shading(myMesh, images, mapMat);
+
+#ifdef DEBUG
+	debug_stream << "shading time:\t" << time(0) - time_clock << endl;
+	time_clock = time(0);
+#endif // DEBUG
+
 	myMesh.writeMesh(output_file_ply);
 
 #ifdef DEBUG
-	ofstream debug_stream;
-	debug_stream.open("C:\\Temp\\data\\debug.log");
-
-	Mat_<cv::Vec3b> debug_image = imread(images.at(0));
-	debug_stream << "r,g,b:\t" << static_cast<int>(debug_image(1100, 2100)[0]) << "\t"
-				 << static_cast<int>(debug_image(1100, 2100)[1]) << "\t" 
-				 << static_cast<int>(debug_image(1100, 2100)[2]) << endl;
-
+	debug_stream << "writing mesh time:\t" << time(0) - time_clock << endl;
 	debug_stream.close();
 #endif // DEBUG
 
@@ -149,30 +170,37 @@ void getMapMatrix(MatrixXi &mat, MatrixXi &pixels, VectorXd depth, MatrixXi &pix
 
 void shading(MyPolygonMesh &mesh, vector<string> &images, MatrixXi &mapMat)
 {
-	Mat_<cv::Vec3b> temp_image;
-	int pixel[2];
+	//Mat_<cv::Vec3b> temp_image;
+	Mat temp_image;
+	uint16_t pixel[2];
 	int vertexNum = mesh.vertexNum;
 	int imageNum = images.size();
-	MatrixXi counts(MatrixXi::Zero(1, vertexNum));			//	the count of value
+	MatrixXf counts(MatrixXf::Zero(1, vertexNum));			//	the count of value
 
-#ifdef _USE_OMP
-	#pragma omp parallel for shared(mesh, images, mapMat, counts, imageNum, vertexNum) private(temp_image, pixel)
-#endif // _USE_OMP
+	#ifdef _USE_OMP
+		#pragma omp parallel for shared(mesh, images, mapMat, counts, imageNum, vertexNum) private(temp_image, pixel)
+	#endif // _USE_OMP
+
 	for (int i = 0; i < imageNum; i++)
 	{
-		temp_image = imread(images.at(i));
-		for (int j = 0; j < vertexNum && mapMat(i, j); j++)
+		temp_image = imread(images.at(i)); 
+		for (int j = 0; j < vertexNum; j++)
 		{
-			pixel[0] = mapMat(i, j) >> 16;
-			pixel[1] = mapMat(i, j) & 0x00001111;
-			mesh.colors(2, j) += temp_image(pixel[0], pixel[1])[0];
-			mesh.colors(1, j) += temp_image(pixel[0], pixel[1])[1];
-			mesh.colors(0, j) += temp_image(pixel[0], pixel[1])[2];
-			counts(0, j)++;
+			if (mapMat(i, j))
+			{
+				*(uint32_t*)pixel = mapMat(i, j);
+				mesh.colors.col(j) += (*(temp_image.ptr<Matrix<uchar, 3, 1>>(pixel[0], pixel[1]))).cast<float>();
+				//pixel[0] = mapMat(i, j) >> 16;							//	pixel_x
+				//pixel[1] = mapMat(i, j) & 0x0000FFFF;						//	pixel_y
+				//mesh.colors(0, j) += temp_image(pixel[1], pixel[0])[0];	//	in opencv, col_0  col_1  col_2  ...
+				//mesh.colors(1, j) += temp_image(pixel[1], pixel[0])[1];	//	     row_0 b,g,r  b,g,r  b,g,r  ...
+				//mesh.colors(2, j) += temp_image(pixel[1], pixel[0])[2];	//	     row_1 b,g,r  b,g,r  b,g,r  ...
+				counts(0, j) += 1;
+			}
 		}
 	}
 
-	mesh.colors.row(0) << mesh.colors.row(0).cwiseQuotient(counts.cast<float>());
-	mesh.colors.row(1) << mesh.colors.row(1).cwiseQuotient(counts.cast<float>());
-	mesh.colors.row(2) << mesh.colors.row(2).cwiseQuotient(counts.cast<float>());
+	mesh.colors.row(0) << mesh.colors.row(0).cwiseQuotient(counts);
+	mesh.colors.row(1) << mesh.colors.row(1).cwiseQuotient(counts);
+	mesh.colors.row(2) << mesh.colors.row(2).cwiseQuotient(counts);
 }

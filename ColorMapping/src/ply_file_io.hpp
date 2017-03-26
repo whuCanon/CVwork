@@ -2,6 +2,8 @@
 #include <Eigen/Dense>
 
 #include <pcl/io/ply_io.h>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -9,6 +11,7 @@
 #include <string>
 
 
+using namespace cv;
 using namespace std;
 using namespace pcl;
 using namespace Eigen;
@@ -96,7 +99,7 @@ MyPolygonMesh::MyPolygonMesh(string ply_filename)
 //		for (int j = 0; j < 12; j++)
 //			databuf.push_back(this->cloud.data.at(12 * i + j));
 //		for (int j = 0; j < 3; j++)
-//			databuf.push_back(this->colors(j, i));
+//			databuf.push_back(static_cast<uchar>(this->colors(j, i)));
 //	}
 //	this->cloud.data = databuf;
 //
@@ -131,14 +134,15 @@ void MyPolygonMesh::writeMesh(string ply_filename)
 		out_stream << this->vertexs.at(i)(0) << " ";
 		out_stream << this->vertexs.at(i)(1) << " ";
 		out_stream << this->vertexs.at(i)(2) << " ";
-		out_stream << static_cast<int>(this->colors(0, i)) << " ";
+		out_stream << static_cast<int>(this->colors(2, i)) << " ";
 		out_stream << static_cast<int>(this->colors(1, i)) << " ";
-		out_stream << static_cast<int>(this->colors(2, i)) << " " << endl;
+		out_stream << static_cast<int>(this->colors(0, i)) << " " << endl;
 	}
 
 	//	write face
 	for (int i = 0; i < this->polygons.size(); i++)
 	{
+		out_stream << this->polygons.at(0).vertices.size() << " ";
 		out_stream << this->polygons.at(i).vertices[0] << " ";
 		out_stream << this->polygons.at(i).vertices[1] << " ";
 		out_stream << this->polygons.at(i).vertices[2] << endl;
