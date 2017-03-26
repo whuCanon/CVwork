@@ -29,7 +29,7 @@ void getMapMatrix(MatrixXi &mat, MatrixXi &pixels, VectorXd depth, MatrixXi &pix
 
 /*  shading the final color assignment for each vetex by simply compute the
 average of the corresponding colors in images.*/
-void shading(MyPolygonMesh &mesh, vector<string> &images, MatrixXi &mapMat);
+void shading(MyPolygonMesh &mesh, vector<string> &images, vector<MatrixXd> &T, MatrixXi &mapMat);
 
 
 int main(int argc, char **argv)
@@ -48,7 +48,8 @@ int main(int argc, char **argv)
 
 	MyPolygonMesh myMesh(input_file_ply);
 	vector<string> images = getFilesInDir(input_dir_images, ".jpg");
-	vector<MatrixXd> T = getTInFile(input_dir_h5, input_file_h5);	//	the projection matrix in 3*4 size
+	vector<MatrixXd> T = getKTInFile(input_dir_h5, input_file_h5);	//	the Eulerian matrixs of all image
+	vector<MatrixXd> KT = getKTInFile(input_dir_h5, input_file_h5);	//	the projection matrix in 3*4 size
 	/*  the mapping matrix between image and corresponding visible vertexs.
 		If there is a mapping, the value in mapMat(i, j) is the pixel of
 		vertexs(j) in image(i), stored in 'int' which x in higher 16 bits
@@ -89,18 +90,20 @@ int main(int argc, char **argv)
 
 	omp_set_num_threads(processorNum);
 	
-	#pragma omp parallel for shared(T, mapMat, vertexs, OMP_points, OMP_pixel_of_v, OMP_pixel_isOccupyed) private(thread_id)
+	#pragma omp parallel for \
+	    shared(KT, mapMat, vertexs, OMP_points, OMP_pixel_of_v, OMP_pixel_isOccupyed) \
+	    private(thread_id)
 	for (int i = 0; i < image_size; i++)
 	{
 		thread_id = omp_get_thread_num();
 
-		OMP_points[thread_id] << T.at(i) * vertexs;
+		OMP_points[thread_id] << KT.at(i) * vertexs;
 		OMP_points[thread_id].row(0) << OMP_points[thread_id].row(0).cwiseQuotient(OMP_points[thread_id].row(2));
 		OMP_points[thread_id].row(1) << OMP_points[thread_id].row(1).cwiseQuotient(OMP_points[thread_id].row(2));
 		OMP_pixel_of_v[thread_id] << OMP_points[thread_id].topRows(2).cast<int>();
 
 		getMapMatrix(mapMat, OMP_pixel_of_v[thread_id], OMP_points[thread_id].row(2), OMP_pixel_isOccupyed[thread_id], i);
-		cout << "step\t" << i << endl;
+		//cout << "step\t" << i << endl;
 	}
 
 	delete[] OMP_points;
@@ -110,13 +113,13 @@ int main(int argc, char **argv)
 	pixel_isOccupyed = MatrixXi::Zero(IMAGE_ROW, IMAGE_COL);
 	for (int i = 0; i < image_size; i++)
 	{
-		points << T.at(i) * vertexs;
+		points << KT.at(i) * vertexs;
 		points.row(0) << points.row(0).cwiseQuotient(points.row(2));
 		points.row(1) << points.row(1).cwiseQuotient(points.row(2));
 		pixel_of_v << points.topRows(2).cast<int>();
 		
 		getMapMatrix(mapMat, pixel_of_v, points.row(2), pixel_isOccupyed, i);
-		cout << "step\t" << i << endl;
+		//cout << "step\t" << i << endl;
 	}
 #endif // _USE_OMP
 
@@ -125,7 +128,7 @@ int main(int argc, char **argv)
 	time_clock = time(0);
 #endif // DEBUG
 
-	shading(myMesh, images, mapMat);
+	shading(myMesh, images, T, mapMat);
 
 #ifdef DEBUG
 	debug_stream << "shading time:\t" << time(0) - time_clock << endl;
@@ -168,17 +171,23 @@ void getMapMatrix(MatrixXi &mat, MatrixXi &pixels, VectorXd depth, MatrixXi &pix
 }
 
 
-void shading(MyPolygonMesh &mesh, vector<string> &images, MatrixXi &mapMat)
+void shading(MyPolygonMesh &mesh, vector<string> &images, vector<MatrixXd> &T, MatrixXi &mapMat)
 {
 	//Mat_<cv::Vec3b> temp_image;
 	Mat temp_image;
-	uint16_t pixel[2];
+
 	int vertexNum = mesh.vertexNum;
 	int imageNum = images.size();
-	MatrixXf counts(MatrixXf::Zero(1, vertexNum));			//	the count of value
+
+	float weight;
+	uint16_t pixel[2];
+	Vector3d vertexNormal;
+	MatrixXf sumOfWeight(MatrixXf::Zero(1, vertexNum));
 
 	#ifdef _USE_OMP
-		#pragma omp parallel for shared(mesh, images, mapMat, counts, imageNum, vertexNum) private(temp_image, pixel)
+		#pragma omp parallel for \
+		    shared(mesh, images, T, mapMat, sumOfWeight, imageNum, vertexNum) \
+		    private(temp_image, pixel, vertexNormal, weight)
 	#endif // _USE_OMP
 
 	for (int i = 0; i < imageNum; i++)
@@ -189,18 +198,22 @@ void shading(MyPolygonMesh &mesh, vector<string> &images, MatrixXi &mapMat)
 			if (mapMat(i, j))
 			{
 				*(uint32_t*)pixel = mapMat(i, j);
-				mesh.colors.col(j) += (*(temp_image.ptr<Matrix<uchar, 3, 1>>(pixel[0], pixel[1]))).cast<float>();
+				vertexNormal = T.at(i) * (Vector4d() << mesh.normals.col(j).cast<double>(), 1).finished();
+				weight = fabs(vertexNormal.normalized().dot(Vector3d(0, 0, 1)));
+
+				mesh.colors.col(j) += weight * (*(temp_image.ptr<Matrix<uchar, 3, 1>>(pixel[0], pixel[1]))).cast<float>();
 				//pixel[0] = mapMat(i, j) >> 16;							//	pixel_x
 				//pixel[1] = mapMat(i, j) & 0x0000FFFF;						//	pixel_y
 				//mesh.colors(0, j) += temp_image(pixel[1], pixel[0])[0];	//	in opencv, col_0  col_1  col_2  ...
 				//mesh.colors(1, j) += temp_image(pixel[1], pixel[0])[1];	//	     row_0 b,g,r  b,g,r  b,g,r  ...
 				//mesh.colors(2, j) += temp_image(pixel[1], pixel[0])[2];	//	     row_1 b,g,r  b,g,r  b,g,r  ...
-				counts(0, j) += 1;
+				
+				sumOfWeight(0, j) += weight;
 			}
 		}
 	}
 
-	mesh.colors.row(0) << mesh.colors.row(0).cwiseQuotient(counts);
-	mesh.colors.row(1) << mesh.colors.row(1).cwiseQuotient(counts);
-	mesh.colors.row(2) << mesh.colors.row(2).cwiseQuotient(counts);
+	mesh.colors.row(0) << mesh.colors.row(0).cwiseQuotient(sumOfWeight);
+	mesh.colors.row(1) << mesh.colors.row(1).cwiseQuotient(sumOfWeight);
+	mesh.colors.row(2) << mesh.colors.row(2).cwiseQuotient(sumOfWeight);
 }

@@ -13,7 +13,7 @@ using namespace std;
 using namespace Eigen;
 
 vector<string> getFilesInDir(string directory, string img_suffix);
-vector<MatrixXd> getTInFile(string T1_dir, string T2_file);
+vector<MatrixXd> getKTInFile(string T1_dir, string T2_file, bool getTOnly);
 
 
 vector<string> getFilesInDir(string directory, string format)
@@ -39,7 +39,7 @@ vector<string> getFilesInDir(string directory, string format)
 	return result;
 }
 
-vector<MatrixXd> getTInFile(string T1_dir, string T2_file)
+vector<MatrixXd> getKTInFile(string T1_dir, string T2_file, bool getTOnly = false)
 {
 	vector<string> T1_files = getFilesInDir(T1_dir, ".h5");
 	
@@ -69,7 +69,10 @@ vector<MatrixXd> getTInFile(string T1_dir, string T2_file)
 			fileReader.setDatasetname(tmp_dsetname);
 			fileReader.getMatrix(T1);
 
-			result.push_back(K * T2 * T1.inverse());
+			if (getTOnly)
+				result.push_back(T2 * T1.inverse());
+			else
+				result.push_back(K * T2 * T1.inverse());
 		}
 	}
 	return result;

@@ -28,12 +28,14 @@ public:
 	~MyPolygonMesh() {}
 
 	vector<Eigen::Vector3f> vertexs;
+	MatrixXf normals;
 	MatrixXf colors;
 
 	int vertexNum;
 
 private:
-
+	void loadVerticesFromData();
+	void computeNormals();
 };
 
 
@@ -42,22 +44,10 @@ MyPolygonMesh::MyPolygonMesh(string ply_filename)
 	pcl::PLYReader plyReader = pcl::PLYReader();
 	plyReader.read(ply_filename, *this);
 
-	// get all vertex from meshData
-	this->vertexNum = this->cloud.height * this->cloud.width;
-	float *tmpPoint;
-	uint8_t tmpPointBuf[12];
-	for (int i = 0; i < this->vertexNum; i++)
-	{
-		for (int j = 0; j < 12; j++)
-		{
-			if (this->cloud.is_bigendian)
-				tmpPointBuf[j] = this->cloud.data[i * this->cloud.point_step + (3 - (j % 4) + j / 4 * 4)];
-			else
-				tmpPointBuf[j] = this->cloud.data[i * this->cloud.point_step + j];
-		}
-		tmpPoint = (float*) tmpPointBuf;
-		this->vertexs.push_back(Vector3f(tmpPoint));
-	}
+	loadVerticesFromData();
+
+	this->normals = MatrixXf::Zero(3, this->vertexNum);
+	computeNormals();
 
 	this->colors = MatrixXf::Zero(3, this->vertexNum);
 }
@@ -149,4 +139,41 @@ void MyPolygonMesh::writeMesh(string ply_filename)
 	}
 
 	out_stream.close();
+}
+
+
+inline void MyPolygonMesh::loadVerticesFromData()
+{
+	this->vertexNum = this->cloud.height * this->cloud.width;
+	float *tmpPoint;
+	uint8_t tmpPointBuf[12];
+	for (int i = 0; i < this->vertexNum; i++)
+	{
+		for (int j = 0; j < 12; j++)
+		{
+			if (this->cloud.is_bigendian)
+				tmpPointBuf[j] = this->cloud.data[i * this->cloud.point_step + (3 - (j % 4) + j / 4 * 4)];
+			else
+				tmpPointBuf[j] = this->cloud.data[i * this->cloud.point_step + j];
+		}
+		tmpPoint = (float*)tmpPointBuf;
+		this->vertexs.push_back(Vector3f(tmpPoint));
+	}
+}
+
+
+inline void MyPolygonMesh::computeNormals()
+{
+	Vector3f vec_v1_to_v2, vec_v1_to_v3, result;
+
+	for each (pcl::Vertices v in this->polygons)
+	{
+		vec_v1_to_v2 = this->vertexs.at(v.vertices[1]) - this->vertexs.at(v.vertices[0]);
+		vec_v1_to_v3 = this->vertexs.at(v.vertices[2]) - this->vertexs.at(v.vertices[0]);
+		result = vec_v1_to_v2.cross(vec_v1_to_v3).normalized();
+
+		this->normals.col(v.vertices[0]) += result;
+		this->normals.col(v.vertices[1]) += result;
+		this->normals.col(v.vertices[2]) += result;
+	}
 }
