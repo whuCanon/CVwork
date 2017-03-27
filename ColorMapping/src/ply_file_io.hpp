@@ -165,12 +165,29 @@ inline void MyPolygonMesh::loadVerticesFromData()
 inline void MyPolygonMesh::computeNormals()
 {
 	Vector3f vec_v1_to_v2, vec_v1_to_v3, result;
+	double cos_theta;
 
 	for each (pcl::Vertices v in this->polygons)
 	{
 		vec_v1_to_v2 = this->vertexs.at(v.vertices[1]) - this->vertexs.at(v.vertices[0]);
 		vec_v1_to_v3 = this->vertexs.at(v.vertices[2]) - this->vertexs.at(v.vertices[0]);
 		result = vec_v1_to_v2.cross(vec_v1_to_v3).normalized();
+
+		cos_theta = this->normals.col(v.vertices[0]).dot(result);
+		if (cos_theta < 0)
+		{
+			this->normals.col(v.vertices[0]) = -this->normals.col(v.vertices[0]);
+		}
+		cos_theta = this->normals.col(v.vertices[1]).dot(result);
+		if (cos_theta < 0)
+		{
+			this->normals.col(v.vertices[1]) = -this->normals.col(v.vertices[1]);
+		}
+		cos_theta = this->normals.col(v.vertices[2]).dot(result);
+		if (cos_theta < 0)
+		{
+			this->normals.col(v.vertices[2]) = -this->normals.col(v.vertices[2]);
+		}
 
 		this->normals.col(v.vertices[0]) += result;
 		this->normals.col(v.vertices[1]) += result;
