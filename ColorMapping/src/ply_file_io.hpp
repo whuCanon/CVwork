@@ -53,51 +53,6 @@ MyPolygonMesh::MyPolygonMesh(string ply_filename)
 }
 
 
-//void MyPolygonMesh::writeMesh(string ply_filename)
-//{
-//	PCLPointField colorField = PCLPointField();
-//
-//	//	write 'r' field
-//	colorField.name = "red";
-//	colorField.offset = 12;
-//	colorField.datatype = 2;
-//	colorField.count = 1;
-//	this->cloud.fields.push_back(colorField);
-//
-//	//	write 'g' field
-//	colorField.name = "green";
-//	colorField.offset = 13;
-//	colorField.datatype = 2;
-//	colorField.count = 1;
-//	this->cloud.fields.push_back(colorField);
-//
-//	//	write 'b' field
-//	colorField.name = "blue";
-//	colorField.offset = 14;
-//	colorField.datatype = 2;
-//	colorField.count = 1;
-//	this->cloud.fields.push_back(colorField);
-//
-//	//	modify 'point_step' and 'row_step'
-//	this->cloud.point_step += 3;
-//	this->cloud.row_step += 3 * this->cloud.height * this->cloud.width;
-//
-//	//	write data to 'data'
-//	vector<uint8_t> databuf;
-//	for (int i = 0; i < this->vertexNum; i++)
-//	{
-//		for (int j = 0; j < 12; j++)
-//			databuf.push_back(this->cloud.data.at(12 * i + j));
-//		for (int j = 0; j < 3; j++)
-//			databuf.push_back(static_cast<uchar>(this->colors(j, i)));
-//	}
-//	this->cloud.data = databuf;
-//
-//	//	save ply_file
-//	pcl::io::savePLYFileBinary(ply_filename, *this);
-//}
-
-
 void MyPolygonMesh::writeMesh(string ply_filename) 
 {
 	ofstream out_stream;

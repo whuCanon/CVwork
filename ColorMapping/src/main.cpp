@@ -1,4 +1,3 @@
-
 #include <omp.h>
 #include <Eigen/Dense>
 #include <opencv2/core/core.hpp>
@@ -25,23 +24,22 @@ using namespace pcl;
 using namespace Eigen;
 
 
-void getMapMatrix(MyPolygonMesh &mesh, MatrixXi &mat, MatrixXi &pixels, VectorXd depth, MatrixXi &pixel_isOccupyed, int index);
+void getMapMatrix(MyPolygonMesh &mesh, MatrixXi &mat, MatrixXi &pixels, VectorXd depth, Matrix<vector<int>, -1, -1> &pixel_isOccupyed, int index);
 
 /*  shading the final color assignment for each vetex by simply compute the
 average of the corresponding colors in images.*/
 void shading(MyPolygonMesh &mesh, vector<string> &images, vector<MatrixXd> &T, MatrixXi &mapMat);
 
-inline void rendering(MatrixXi &mapMat, MatrixXi & pixels, MatrixXi &pixel_isOccupyed, vector<uint32_t> &v, int index_face, int indec_image);
+inline void rendering(MatrixXi & pixels, Matrix<vector<int>, -1, -1> &pixel_isOccupyed, vector<uint32_t> &v, int index_face);
 inline void getExtremun(int &min_x, int &max_x, int value_1, int value_2, int value_3);
 inline bool pointInTriangle(Vector2i A, Vector2i B, Vector2i C, Vector2i P);
-
 
 int main(int argc, char **argv)
 {
 #ifdef DEBUG
 	time_t time_clock = time(0);
 	ofstream debug_stream;
-	debug_stream.open("C:\\Temp\\data\\debug.log");
+	debug_stream.open("D:\\debug.log");
 #endif // DEBUG
 
 	string input_file_ply = argv[1];
@@ -52,7 +50,7 @@ int main(int argc, char **argv)
 
 	MyPolygonMesh myMesh(input_file_ply);
 	vector<string> images = getFilesInDir(input_dir_images, ".jpg");
-	vector<MatrixXd> T = getKTInFile(input_dir_h5, input_file_h5);	//	the Eulerian matrixs of all image
+	vector<MatrixXd> T = getKTInFile(input_dir_h5, input_file_h5, true);	//	the Eulerian matrixs of all image
 	vector<MatrixXd> KT = getKTInFile(input_dir_h5, input_file_h5);	//	the projection matrix in 3*4 size
 	/*  the mapping matrix between image and corresponding visible vertexs.
 		If there is a mapping, the value in mapMat(i, j) is the pixel of
@@ -66,7 +64,7 @@ int main(int argc, char **argv)
 	/*  the occupancy of vetexs for a particular image.
 		If pixel(i,j) is occupyed in the image by a vetex, the value
 		is the index of this vetex, 0 otherwise.*/
-	MatrixXi pixel_isOccupyed(IMAGE_ROW, IMAGE_COL);
+	Matrix<vector<int>, -1, -1> pixel_isOccupyed(IMAGE_ROW, IMAGE_COL);
 
 	for (int i = 0; i < myMesh.vertexNum; i++)
 		vertexs.col(i) << (Vector4d() << myMesh.vertexs.at(i).cast<double>(), 1).finished();
@@ -79,17 +77,31 @@ int main(int argc, char **argv)
 
 #ifdef _USE_OMP
 	int thread_id;
-	int processorNum = atoi(getenv("NUMBER_OF_PROCESSORS")) - 1;
+	int processorNum = 7;
 
 	MatrixXd *OMP_points = new MatrixXd [processorNum];
-	MatrixXi *OMP_pixel_of_v = new MatrixXi [processorNum];
-	MatrixXi *OMP_pixel_isOccupyed = new MatrixXi [processorNum];
+	MatrixXi *OMP_pixel_of_v = new MatrixXi[processorNum];
+	Matrix<vector<int>, -1, -1> pixel_isOccupyed_0(IMAGE_ROW, IMAGE_COL);
+	Matrix<vector<int>, -1, -1> pixel_isOccupyed_1(IMAGE_ROW, IMAGE_COL);
+	Matrix<vector<int>, -1, -1> pixel_isOccupyed_2(IMAGE_ROW, IMAGE_COL);
+	Matrix<vector<int>, -1, -1> pixel_isOccupyed_3(IMAGE_ROW, IMAGE_COL);
+	Matrix<vector<int>, -1, -1> pixel_isOccupyed_4(IMAGE_ROW, IMAGE_COL);
+	Matrix<vector<int>, -1, -1> pixel_isOccupyed_5(IMAGE_ROW, IMAGE_COL);
+	Matrix<vector<int>, -1, -1> pixel_isOccupyed_6(IMAGE_ROW, IMAGE_COL);
+	Matrix<vector<int>, -1, -1> *OMP_pixel_isOccupyed = new Matrix<vector<int>, -1, -1>[7];
+	OMP_pixel_isOccupyed[0] = pixel_isOccupyed_0;
+	OMP_pixel_isOccupyed[1] = pixel_isOccupyed_1;
+	OMP_pixel_isOccupyed[2] = pixel_isOccupyed_2;
+	OMP_pixel_isOccupyed[3] = pixel_isOccupyed_3;
+	OMP_pixel_isOccupyed[4] = pixel_isOccupyed_4;
+	OMP_pixel_isOccupyed[5] = pixel_isOccupyed_5;
+	OMP_pixel_isOccupyed[6] = pixel_isOccupyed_6;
 
 	for (int i = 0; i < processorNum; i++)
 	{
 		OMP_points[i] = MatrixXd(3, myMesh.vertexNum);
 		OMP_pixel_of_v[i] = MatrixXi(2, myMesh.vertexNum);
-		OMP_pixel_isOccupyed[i] = MatrixXi::Zero(IMAGE_ROW, IMAGE_COL);
+		//OMP_pixel_isOccupyed[i] = pixel_isOccupyed.replicate(1,1);
 	}
 
 	omp_set_num_threads(processorNum);
@@ -112,9 +124,8 @@ int main(int argc, char **argv)
 
 	delete[] OMP_points;
 	delete[] OMP_pixel_of_v;
-	delete[] OMP_pixel_isOccupyed;
+	//delete[] OMP_pixel_isOccupyed;
 #else
-	pixel_isOccupyed = MatrixXi::Zero(IMAGE_ROW, IMAGE_COL);
 	for (int i = 0; i < image_size; i++)
 	{
 		points << KT.at(i) * vertexs;
@@ -123,7 +134,7 @@ int main(int argc, char **argv)
 		pixel_of_v << points.topRows(2).cast<int>();
 		
 		getMapMatrix(myMesh, mapMat, pixel_of_v, points.row(2), pixel_isOccupyed, i);
-		//cout << "step\t" << i << endl;
+		cout << "step\t" << i << endl;
 	}
 #endif // _USE_OMP
 
@@ -150,97 +161,36 @@ int main(int argc, char **argv)
 }
 
 
-void getMapMatrix(MyPolygonMesh &mesh, MatrixXi &mat, MatrixXi &pixels, VectorXd depth, MatrixXi &pixel_isOccupyed, int index)
+void getMapMatrix(MyPolygonMesh &mesh, MatrixXi &mat, MatrixXi &pixels, VectorXd depth, Matrix<vector<int>, -1, -1> &pixel_isOccupyed, int index)
 {
-	int vertexNum = depth.size();
-	int occupyIndex[3];
-
-	pixel_isOccupyed.setZero();
-
-	/*for (int i = 0; i < vertexNum; i++)
-	{
-		occupyIndex = abs(pixel_isOccupyed(pixels(0, i), pixels(1, i)));
-		if (!occupyIndex)
-		{
-			pixel_isOccupyed(pixels(0, i), pixels(1, i)) = -i;
-			mat(index, i) = (pixels(0, i) << 16) + pixels(1, i);
-		}
-		else if (depth(i) < depth(occupyIndex))
-		{
-			mat(index, occupyIndex) = 0;
-			pixel_isOccupyed(pixels(0, i), pixels(1, i)) = i;
-			mat(index, i) = (pixels(0, i) << 16) + pixels(1, i);
-		}
-		else
-		{
-			pixel_isOccupyed(pixels(0, i), pixels(1, i)) = occupyIndex;
-		}
-	}*/
-
-	//	render the object to pixel_isOccupyed 
 	for (int i = 0; i < mesh.polygons.size(); i++)
+		rendering(pixels, pixel_isOccupyed, mesh.polygons.at(i).vertices, i);
+
+	double min_depth = 0;
+	int min_index = 0;
+	for (int i = 0; i < IMAGE_ROW; i++)
 	{
-		vector<uint32_t> v = mesh.polygons.at(i).vertices;
-
-		occupyIndex[0] = pixel_isOccupyed(pixels(0, v[0]), pixels(1, v[0]));
-		if (occupyIndex[0])
+		for (int j = 0; j < IMAGE_COL; j++)
 		{
-			if (find(mesh.polygons.at(occupyIndex[0]).vertices.begin(),
-				mesh.polygons.at(occupyIndex[0]).vertices.end(), v[0]) !=
-				mesh.polygons.at(occupyIndex[0]).vertices.end())
-			{
-				rendering(mat, pixels, pixel_isOccupyed, v, i, index);
-			}
-			else if (depth(v[0]) < depth(mesh.polygons.at(occupyIndex[0]).vertices[0]))
-			{
-				mat(index, mesh.polygons.at(occupyIndex[0]).vertices[0]) = 0;
-				mat(index, mesh.polygons.at(occupyIndex[0]).vertices[1]) = 0;
-				mat(index, mesh.polygons.at(occupyIndex[0]).vertices[2]) = 0;
-				rendering(mat, pixels, pixel_isOccupyed, v, i, index);
-			}
-			continue;
-		}
+			if (pixel_isOccupyed(i, j).empty())
+				continue;
 
-		occupyIndex[1] = pixel_isOccupyed(pixels(0, v[1]), pixels(1, v[1]));
-		if (occupyIndex[1])
-		{
-			if (find(mesh.polygons.at(occupyIndex[1]).vertices.begin(),
-				mesh.polygons.at(occupyIndex[1]).vertices.end(), v[1]) !=
-				mesh.polygons.at(occupyIndex[1]).vertices.end())
+			min_index = pixel_isOccupyed(i, j)[0];
+			min_depth = depth(mesh.polygons.at(min_index).vertices[0]);
+			for each (int k in pixel_isOccupyed(i,j))
 			{
-				rendering(mat, pixels, pixel_isOccupyed, v, i, index);
+				if (depth(mesh.polygons.at(k).vertices[0]) < min_depth)
+				{
+					min_index = k;
+					min_depth = depth(mesh.polygons.at(k).vertices[0]);
+				}
 			}
-			else if (depth(v[1]) < depth(mesh.polygons.at(occupyIndex[1]).vertices[0]))
-			{
-				mat(index, mesh.polygons.at(occupyIndex[1]).vertices[0]) = 0;
-				mat(index, mesh.polygons.at(occupyIndex[1]).vertices[1]) = 0;
-				mat(index, mesh.polygons.at(occupyIndex[1]).vertices[2]) = 0;
-				rendering(mat, pixels, pixel_isOccupyed, v, i, index);
-			}
-			continue;
-		}
+			mat(index, mesh.polygons.at(min_index).vertices[0]) = (pixels(0, mesh.polygons.at(min_index).vertices[0]) << 16) + pixels(1, mesh.polygons.at(min_index).vertices[0]);
+			mat(index, mesh.polygons.at(min_index).vertices[1]) = (pixels(0, mesh.polygons.at(min_index).vertices[1]) << 16) + pixels(1, mesh.polygons.at(min_index).vertices[1]);
+			mat(index, mesh.polygons.at(min_index).vertices[2]) = (pixels(0, mesh.polygons.at(min_index).vertices[2]) << 16) + pixels(1, mesh.polygons.at(min_index).vertices[2]);
 
-		occupyIndex[2] = pixel_isOccupyed(pixels(0, v[2]), pixels(1, v[2]));
-		if (occupyIndex[2])
-		{
-			if (find(mesh.polygons.at(occupyIndex[2]).vertices.begin(),
-				mesh.polygons.at(occupyIndex[2]).vertices.end(), v[2]) !=
-				mesh.polygons.at(occupyIndex[2]).vertices.end())
-			{
-				rendering(mat, pixels, pixel_isOccupyed, v, i, index);
-			}
-			else if (depth(v[2]) < depth(mesh.polygons.at(occupyIndex[2]).vertices[0]))
-			{
-				mat(index, mesh.polygons.at(occupyIndex[2]).vertices[0]) = 0;
-				mat(index, mesh.polygons.at(occupyIndex[2]).vertices[1]) = 0;
-				mat(index, mesh.polygons.at(occupyIndex[2]).vertices[2]) = 0;
-				rendering(mat, pixels, pixel_isOccupyed, v, i, index);
-			}
-			continue;
+			pixel_isOccupyed(i, j).swap(vector<int>());
 		}
-
-		//	if (!occupyIndex)
-		rendering(mat, pixels, pixel_isOccupyed, v, i, index);
 	}
 }
 
@@ -272,7 +222,7 @@ void shading(MyPolygonMesh &mesh, vector<string> &images, vector<MatrixXd> &T, M
 			if (mapMat(i, j))
 			{
 				*(uint32_t*)pixel = mapMat(i, j);
-				vertexNormal = T.at(i) * (Vector4d() << mesh.normals.col(j).cast<double>(), 1).finished();
+				vertexNormal = (T.at(i) * (Vector4d() << mesh.normals.col(j).cast<double>(), 1).finished()).head(3);
 				weight = pow(vertexNormal.normalized().dot(Vector3d(0, 0, 1)), 2);
 
 				mesh.colors.col(j) += weight * (*(temp_image.ptr<Matrix<uchar, 3, 1>>(pixel[0], pixel[1]))).cast<float>();
@@ -293,7 +243,7 @@ void shading(MyPolygonMesh &mesh, vector<string> &images, vector<MatrixXd> &T, M
 }
 
 
-inline void rendering(MatrixXi &mapMat, MatrixXi & pixels, MatrixXi &pixel_isOccupyed, vector<uint32_t> &v, int index_face, int index_image)
+inline void rendering(MatrixXi & pixels, Matrix<vector<int>, -1, -1> &pixel_isOccupyed, vector<uint32_t> &v, int index_face)
 {
 	int min_x, min_y, max_x, max_y;
 
@@ -303,11 +253,7 @@ inline void rendering(MatrixXi &mapMat, MatrixXi & pixels, MatrixXi &pixel_isOcc
 	for (int x = min_x; x < max_x; x++)
 		for (int y = min_y; y < max_y; y++)
 			if (pointInTriangle(pixels.col(v[0]), pixels.col(v[1]), pixels.col(v[2]), Vector2i(x, y)))
-				pixel_isOccupyed(x, y) = index_face;
-
-	mapMat(index_image, v[0]) = (pixels(0, v[0]) << 16) + pixels(1, v[0]);
-	mapMat(index_image, v[1]) = (pixels(0, v[1]) << 16) + pixels(1, v[1]);
-	mapMat(index_image, v[2]) = (pixels(0, v[2]) << 16) + pixels(1, v[2]);
+				pixel_isOccupyed(x, y).push_back(index_face);
 }
 
 inline void getExtremun(int &min_x, int &max_x, int value_1, int value_2, int value_3)
